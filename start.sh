@@ -16,8 +16,14 @@ APP="${SCRIPT_DIR}/gpu_monitor.py"
 # environment, e.g. PYTHON_VERSION=3.13 ./start.sh
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 
-# Runtime dependencies of gpu_monitor.py.
-DEPENDENCIES=(matplotlib nvidia-ml-py)
+# Runtime dependencies. Each front-end pulls only what it needs, so --no-gui
+# stays light and the web mode does not drag in matplotlib.
+DEPENDENCIES=(nvidia-ml-py numpy)
+case " $* " in
+    *" --no-gui "*) ;;
+    *" --web "*)    DEPENDENCIES+=(dash plotly) ;;
+    *)              DEPENDENCIES+=(matplotlib) ;;
+esac
 
 err() { printf 'error: %s\n' "$*" >&2; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -38,9 +44,11 @@ if ! command -v nvidia-smi >/dev/null 2>&1; then
     exit 1
 fi
 
-# matplotlib needs a graphical session to open its window.
-if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+# Only the desktop window needs a graphical session; --web and --no-gui do not.
+if [[ " ${DEPENDENCIES[*]} " == *" matplotlib "* \
+      && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
     warn "neither DISPLAY nor WAYLAND_DISPLAY is set; the plot window may fail to open."
+    warn "over SSH, try './start.sh --web' and tunnel the port, or './start.sh --no-gui'."
 fi
 
 # Turn the dependency list into the repeated --with flags uv expects.
