@@ -12,11 +12,11 @@ from matplotlib.widgets import Button, RadioButtons, Slider, TextBox
 
 from gpu_core import (COLOR_BUS, COLOR_FB, COLOR_GTEMP, COLOR_MTEMP, COLOR_POWER, COLOR_RX,
                       COLOR_SM, COLOR_TX, DEFAULT_BW_AXIS, DEFAULT_RATE_HZ, DEFAULT_UTIL_AXIS,
-                      DEFAULT_WINDOW_SECONDS, FILL_ALPHA,
-                      MARKER_MAX_POINTS, MAX_HISTORY_SECONDS, PLOT_INTERVAL_MS, RAW_LIGHTEN,
-                      SAMPLE_RATES, SMOOTHING_STEPS, SMOOTH_MAX_POINTS, WINDOW_LENGTHS,
-                      default_power_axis, default_temp_axis, envelope, format_elapsed,
-                      format_limits, format_window, parse_duration, parse_limits)
+                      DEFAULT_WINDOW_SECONDS, FILL_ALPHA, MARKER_MAX_POINTS,
+                      MAX_HISTORY_SECONDS, PLOT_INTERVAL_MS, RAW_LIGHTEN, SAMPLE_RATES,
+                      SMOOTHING_STEPS, SMOOTH_MAX_POINTS, WINDOW_LENGTHS, default_power_axis,
+                      default_temp_axis, envelope, format_elapsed, format_limits,
+                      format_window, parse_duration, parse_limits, round_limits)
 
 def lighten(color: str, amount: float = RAW_LIGHTEN) -> tuple[float, float, float]:
     """Blend a color towards white, for the raw-sample line."""
@@ -175,7 +175,7 @@ def run(sampler, view, show: bool = True):
         def adopt(self, ax) -> None:
             """Copy a range the mouse changed on `ax` back into the box."""
             if not state.redrawing:
-                self.set_bounds(*ax.get_ylim())
+                self.set_bounds(*round_limits(*ax.get_ylim()))
 
         def apply(self, ax) -> float:
             """Pin the axis to these bounds and return the baseline for its fills."""

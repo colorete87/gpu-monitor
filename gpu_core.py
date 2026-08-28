@@ -384,6 +384,17 @@ def format_limits(low: float, high: float) -> str:
     return f"{low:g}{LIMIT_SEPARATOR}{high:g}"
 
 
+def round_limits(low: float, high: float) -> tuple[float, float]:
+    """Widen an axis range out to whole numbers.
+
+    Rounding outward rather than to nearest keeps whatever was inside the
+    original range inside the rounded one, so an autoscale or a drag never
+    clips the very samples it was meant to frame.
+    """
+    low, high = math.floor(low), math.ceil(high)
+    return (low, high) if high > low else (low, low + 1)
+
+
 def parse_limits(text, fallback: tuple[float, float]) -> tuple[float, float]:
     """Read a "min;max" axis range, falling back when the text is unusable.
 

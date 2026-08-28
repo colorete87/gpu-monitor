@@ -18,13 +18,12 @@ from dash.exceptions import PreventUpdate
 from plotly.subplots import make_subplots
 
 from gpu_core import (COLOR_BUS, COLOR_FB, COLOR_GTEMP, COLOR_MTEMP, COLOR_POWER, COLOR_RX,
-                      COLOR_SM, COLOR_TX, DEFAULT_BW_AXIS, FILL_ALPHA, MARKER_MAX_POINTS,
-                      RAW_LIGHTEN,
-                      DEFAULT_UTIL_AXIS, DEFAULT_WINDOW_SECONDS, MAX_HISTORY_SECONDS,
-                      SAMPLE_RATES, SMOOTH_MAX_POINTS,
-                      default_power_axis, default_temp_axis, envelope, format_elapsed,
-                      build_id, format_limits, format_window, parse_duration,
-                      parse_limits)
+                      COLOR_SM, COLOR_TX, DEFAULT_BW_AXIS, DEFAULT_UTIL_AXIS,
+                      DEFAULT_WINDOW_SECONDS, FILL_ALPHA, MARKER_MAX_POINTS,
+                      MAX_HISTORY_SECONDS, RAW_LIGHTEN, SAMPLE_RATES, SMOOTH_MAX_POINTS,
+                      build_id, default_power_axis, default_temp_axis, envelope,
+                      format_elapsed, format_limits, format_window, parse_duration,
+                      parse_limits, round_limits)
 
 WEB_INTERVAL_MS = 1000     # How often the browser asks for a new figure
 PLOT_HEIGHT = 1080         # Total figure height in pixels
@@ -80,10 +79,8 @@ def autoscale_range(data, metrics):
         return None
 
     low, high = float(values.min()), float(values.max())
-    if high <= low:
-        high = low + 1.0
     pad = (high - low) * AUTOSCALE_MARGIN
-    return math.floor((low - pad) * 100) / 100, math.ceil((high + pad) * 100) / 100
+    return round_limits(low - pad, high + pad)
 
 
 def legend_of(row: int) -> str:
@@ -288,7 +285,7 @@ def run(sampler, view, host: str, port: int) -> None:
         for axis, current in zip(AXIS_OF_BOX, shown):
             low, high = relayout.get(f"{axis}.range[0]"), relayout.get(f"{axis}.range[1]")
             if low is not None and high is not None:
-                text = format_limits(float(low), float(high))
+                text = format_limits(*round_limits(float(low), float(high)))
             elif relayout.get(f"{axis}.autorange"):
                 if visible is None:
                     visible = sampler.history.view(view.right_edge - view.window,
