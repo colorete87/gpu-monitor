@@ -1,0 +1,5 @@
+# Sample logs written by each run of the monitor
+logs/
+
+__pycache__/
+*.py[cod]
