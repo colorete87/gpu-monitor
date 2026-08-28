@@ -11,7 +11,7 @@ from matplotlib.ticker import FuncFormatter
 from matplotlib.widgets import Button, RadioButtons, Slider, TextBox
 
 from gpu_core import (COLOR_BUS, COLOR_FB, COLOR_GTEMP, COLOR_MTEMP, COLOR_POWER, COLOR_RX,
-                      COLOR_SM, COLOR_TX, DEFAULT_BW_AXIS, DEFAULT_RATE_HZ,
+                      COLOR_SM, COLOR_TX, DEFAULT_BW_AXIS, DEFAULT_RATE_HZ, DEFAULT_UTIL_AXIS,
                       DEFAULT_WINDOW_SECONDS, FILL_ALPHA,
                       MARKER_MAX_POINTS, MAX_HISTORY_SECONDS, PLOT_INTERVAL_MS, RAW_LIGHTEN,
                       SAMPLE_RATES, SMOOTHING_STEPS, SMOOTH_MAX_POINTS, WINDOW_LENGTHS,
@@ -212,7 +212,7 @@ def run(sampler, view, show: bool = True):
     BOX_RECTS = [(0.815, 0.36 - i * 0.068, 0.17, BOX_HEIGHT) for i in range(5)]
 
     window_box = WindowControl(BOX_RECTS[0], "X window (s/m/h)", DEFAULT_WINDOW_SECONDS)
-    util_limits = LimitControl(BOX_RECTS[1], "Utilization y (%)", 0, 105)
+    util_limits = LimitControl(BOX_RECTS[1], "Utilization y (%)", *DEFAULT_UTIL_AXIS)
     temp_limits = LimitControl(BOX_RECTS[2], "Temperature y (C)", *default_temp_axis(sampler))
     power_limits = LimitControl(BOX_RECTS[3], "Power y (W)", *default_power_axis(sampler))
     bw_limits = LimitControl(BOX_RECTS[4], "PCIe y (MB/s)", *DEFAULT_BW_AXIS)

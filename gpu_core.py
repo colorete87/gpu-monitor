@@ -370,11 +370,13 @@ def format_elapsed(value: float, _pos=None) -> str:
 
 def format_window(seconds: float) -> str:
     """Compact <num><unit> spelling of a duration: the form the boxes accept."""
+    # Four significant digits: an autoscaled span is rarely a round number of
+    # minutes, and the full float would fill the box with noise.
     if seconds >= 3600:
-        return f"{seconds / 3600:g}h"
+        return f"{seconds / 3600:.4g}h"
     if seconds >= 60:
-        return f"{seconds / 60:g}m"
-    return f"{seconds:g}s"
+        return f"{seconds / 60:.4g}m"
+    return f"{seconds:.4g}s"
 
 
 def format_limits(low: float, high: float) -> str:
@@ -396,6 +398,7 @@ def parse_limits(text, fallback: tuple[float, float]) -> tuple[float, float]:
 
 
 LIMIT_SEPARATOR = ";"             # Separates min from max in the limit boxes
+DEFAULT_UTIL_AXIS = (0.0, 105.0)  # Percent, with headroom so a flat 100% stays visible
 DEFAULT_BW_AXIS = (0.0, 3000.0)   # MB/s; RX bursts on this bus reach ~2.5 GB/s
 
 

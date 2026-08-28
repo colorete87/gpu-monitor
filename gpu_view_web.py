@@ -20,7 +20,8 @@ from plotly.subplots import make_subplots
 from gpu_core import (COLOR_BUS, COLOR_FB, COLOR_GTEMP, COLOR_MTEMP, COLOR_POWER, COLOR_RX,
                       COLOR_SM, COLOR_TX, DEFAULT_BW_AXIS, FILL_ALPHA, MARKER_MAX_POINTS,
                       RAW_LIGHTEN,
-                      MAX_HISTORY_SECONDS, SAMPLE_RATES, SMOOTH_MAX_POINTS,
+                      DEFAULT_UTIL_AXIS, DEFAULT_WINDOW_SECONDS, MAX_HISTORY_SECONDS,
+                      SAMPLE_RATES, SMOOTH_MAX_POINTS,
                       default_power_axis, default_temp_axis, envelope, format_elapsed,
                       build_id, format_limits, format_window, parse_duration,
                       parse_limits)
@@ -33,6 +34,14 @@ PLOT_SPACING = 0.13        # Gap between the stacked plots, as a fraction of the
 # temperature on the primary axis and power on the secondary one.
 AXIS_OF_BOX = ("yaxis", "yaxis2", "yaxis3", "yaxis4")
 X_AXES = ("xaxis", "xaxis2", "xaxis3")
+
+# What each y axis draws, so that "Autoscale" can be answered from the data.
+# The toolbar only reports that autorange was switched on, never the bounds it
+# arrived at, so they have to be worked out here.
+METRICS_OF_AXIS = {"yaxis": ("sm", "bus", "fb"), "yaxis2": ("gtemp", "mtemp"),
+                   "yaxis3": ("power",), "yaxis4": ("rx", "tx")}
+AUTOSCALE_MARGIN = 0.05
+ZOOM_STEP = 2.0            # How much one Zoom in / Zoom out press changes the window
 X_TICKS = 8                # Tick count on the shared time axis
 
 PAGE_STYLE = {"backgroundColor": "#111111", "color": "#dddddd", "fontFamily": "sans-serif",
@@ -60,6 +69,28 @@ def lighten(color: str, amount: float = RAW_LIGHTEN) -> str:
     return f"rgb({r},{g},{b})"
 
 
+def autoscale_range(data, metrics):
+    """Bounds that fit the visible samples of the given metrics, with margin."""
+    columns = [data[name] for name in metrics if name in data and data[name].size]
+    if not columns:
+        return None
+    values = np.concatenate(columns)
+    values = values[np.isfinite(values)]      # mtemp is all-NaN when unsupported
+    if not values.size:
+        return None
+
+    low, high = float(values.min()), float(values.max())
+    if high <= low:
+        high = low + 1.0
+    pad = (high - low) * AUTOSCALE_MARGIN
+    return math.floor((low - pad) * 100) / 100, math.ceil((high + pad) * 100) / 100
+
+
+def legend_of(row: int) -> str:
+    """Name of the legend that sits above the given row."""
+    return "legend" if row == 1 else f"legend{row}"
+
+
 def add_series(fig, row, x, y, color, label, secondary_y=False):
     """Add one metric: line, shaded area, and markers on the real samples."""
     x, y = envelope(x, y)
@@ -69,7 +100,7 @@ def add_series(fig, row, x, y, color, label, secondary_y=False):
     trace = go.Scatter if x.size <= SMOOTH_MAX_POINTS else go.Scattergl
     shape = "spline" if trace is go.Scatter else "linear"
     fig.add_trace(
-        trace(x=x, y=y, name=label,
+        trace(x=x, y=y, name=label, legend=legend_of(row),
               mode="lines+markers" if detailed else "lines",
               line=dict(color=color, width=2, shape=shape),
               marker=dict(color=lighten(color), size=4),
@@ -95,9 +126,7 @@ def build_figure(sampler, view, limits) -> go.Figure:
     data = sampler.history.view(start, end)
 
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=PLOT_SPACING,
-                        specs=[[{}], [{"secondary_y": True}], [{}]],
-                        subplot_titles=("Utilization", "Temperature and power",
-                                        "PCIe bandwidth"))
+                        specs=[[{}], [{"secondary_y": True}], [{}]])
     if data["t"].size >= 2:
         t = data["t"]
         add_series(fig, 1, t, data["sm"], COLOR_SM, "GPU-Utilization (sm)")
@@ -125,15 +154,20 @@ def build_figure(sampler, view, limits) -> go.Figure:
               secondary_y=True, position="bottom right")
 
     # Axes are pinned to the values in the boxes and never rescale themselves.
-    fig.update_yaxes(range=list(limits["util"]), title_text="Utilization (%)", row=1, col=1)
-    fig.update_yaxes(range=list(limits["temp"]), title_text="Temperature (C)",
-                     row=2, col=1, secondary_y=False)
-    fig.update_yaxes(range=list(limits["power"]), title_text="Power (W)", tickmode="sync",
-                     row=2, col=1, secondary_y=True)
-    fig.update_yaxes(range=list(limits["bw"]), title_text="PCIe bandwidth (MB/s)", row=3, col=1)
+    # autorange has to be turned off explicitly: setting a range does not clear
+    # it, and while it is on plotly overrides the range sent here and keeps
+    # reporting autorange, which had the boxes recomputed on every refresh.
+    fig.update_yaxes(range=list(limits["util"]), autorange=False,
+                     title_text="Utilization (%)", row=1, col=1)
+    fig.update_yaxes(range=list(limits["temp"]), autorange=False,
+                     title_text="Temperature (C)", row=2, col=1, secondary_y=False)
+    fig.update_yaxes(range=list(limits["power"]), autorange=False, tickmode="sync",
+                     title_text="Power (W)", row=2, col=1, secondary_y=True)
+    fig.update_yaxes(range=list(limits["bw"]), autorange=False,
+                     title_text="PCIe bandwidth (MB/s)", row=3, col=1)
 
     ticks = np.linspace(start, end, X_TICKS)
-    fig.update_xaxes(range=[start, end], tickvals=ticks,
+    fig.update_xaxes(range=[start, end], autorange=False, tickvals=ticks,
                      ticktext=[format_elapsed(v) for v in ticks])
     fig.update_xaxes(title_text="Elapsed time", row=3, col=1)
     # uirevision is deliberately set on the legend alone. On the layout it also
@@ -141,9 +175,16 @@ def build_figure(sampler, view, limits) -> go.Figure:
     # already has and discard the ones sent here: the window stops advancing and
     # the plots look frozen while the data keeps scrolling out of view.
     fig.update_layout(template="plotly_dark", height=PLOT_HEIGHT, hovermode="x unified",
-                      margin=dict(l=70, r=70, t=50, b=40),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  uirevision="legend"))
+                      margin=dict(l=70, r=70, t=40, b=40))
+
+    # One legend per row, parked just above the plot it describes. The rows own
+    # unrelated quantities, so a single shared legend would force the reader to
+    # work out which of eight entries belongs to the plot being read.
+    for row, axis in enumerate(("yaxis", "yaxis2", "yaxis4"), start=1):
+        top = fig.layout[axis].domain[1]
+        fig.update_layout({legend_of(row): dict(
+            orientation="h", x=0.0, xanchor="left", y=top + 0.012, yanchor="bottom",
+            font=dict(size=11), bgcolor="rgba(0,0,0,0)", uirevision="legend")})
     return fig
 
 
@@ -172,7 +213,7 @@ def build_layout(sampler, view):
             html.Div(style=column, children=[
                 html.Div("Utilization y (%)", style=CAPTION_STYLE),
                 dcc.Input(id="ylim-util", debounce=True, style=FIELD_STYLE,
-                          value=format_limits(0, 105))]),
+                          value=format_limits(*DEFAULT_UTIL_AXIS))]),
             html.Div(style=column, children=[
                 html.Div("Temperature y (C)", style=CAPTION_STYLE),
                 dcc.Input(id="ylim-temp", debounce=True, style=FIELD_STYLE,
@@ -188,13 +229,22 @@ def build_layout(sampler, view):
         ]),
         html.Div(style={"display": "flex", "alignItems": "center", "gap": "12px"}, children=[
             html.Button("Pause", id="playpause", n_clicks=0, style=BUTTON_STYLE),
+            html.Button("Zoom in", id="zoom-in", n_clicks=0, style=BUTTON_STYLE),
+            html.Button("Zoom out", id="zoom-out", n_clicks=0, style=BUTTON_STYLE),
+            html.Button("Autoscale: off", id="autoscale", n_clicks=0, style=BUTTON_STYLE),
+            html.Button("Reset axes", id="reset", n_clicks=0, style=BUTTON_STYLE),
             html.Div("Pan (0 = live; the slider also moves with the arrow keys)",
                      style={**CAPTION_STYLE, "marginBottom": "0"}),
         ]),
         dcc.Slider(id="pan", min=-1, max=0, value=0, step=0.1, marks=None,
                    tooltip={"placement": "bottom"}),
-        dcc.Graph(id="graph", config={"displaylogo": False}),
+        # The modebar is replaced by the buttons above, but the interactions it
+        # used to host stay: drag to box zoom, drag an axis to pan it, wheel to
+        # zoom. None of those live in the modebar.
+        dcc.Graph(id="graph", config={"displayModeBar": False, "scrollZoom": True,
+                                      "displaylogo": False}),
         dcc.Interval(id="tick", interval=WEB_INTERVAL_MS),
+        dcc.Store(id="auto", data=False),
     ])
 
 
@@ -233,24 +283,110 @@ def run(sampler, view, host: str, port: int) -> None:
         if not relayout:
             raise PreventUpdate
 
+        visible = None  # Read only if an autoscale actually needs the data.
         updates = []
         for axis, current in zip(AXIS_OF_BOX, shown):
             low, high = relayout.get(f"{axis}.range[0]"), relayout.get(f"{axis}.range[1]")
-            text = None if low is None or high is None else format_limits(float(low), float(high))
+            if low is not None and high is not None:
+                text = format_limits(float(low), float(high))
+            elif relayout.get(f"{axis}.autorange"):
+                if visible is None:
+                    visible = sampler.history.view(view.right_edge - view.window,
+                                                   view.right_edge)
+                bounds = autoscale_range(visible, METRICS_OF_AXIS[axis])
+                text = format_limits(*bounds) if bounds else None
+            else:
+                text = None
             updates.append(text if text is not None and text != current else no_update)
 
-        # A drag on any of the shared time axes becomes the new window width.
+        # A drag on any of the shared time axes becomes the new window width;
+        # autoscaling it means showing every sample held.
         dragged = next((a for a in X_AXES if f"{a}.range[0]" in relayout), None)
-        if dragged is None:
+        if dragged is not None:
+            span = float(relayout[f"{dragged}.range[1]"]) - float(relayout[f"{dragged}.range[0]"])
+        elif any(relayout.get(f"{axis}.autorange") for axis in X_AXES):
+            oldest, newest = sampler.history.span()
+            span = newest - oldest
+        else:
+            span = None
+
+        if span is None:
             updates.append(no_update)
         else:
-            span = float(relayout[f"{dragged}.range[1]"]) - float(relayout[f"{dragged}.range[0]"])
             text = format_window(min(max(span, 1.0), MAX_HISTORY_SECONDS))
             updates.append(text if text != shown[-1] else no_update)
 
         if all(update is no_update for update in updates):
             raise PreventUpdate
         return updates
+
+    @app.callback(
+        Output("window", "value", allow_duplicate=True),
+        Input("zoom-in", "n_clicks"), Input("zoom-out", "n_clicks"),
+        State("window", "value"), prevent_initial_call=True)
+    def zoom_time_axis(_in, _out, window):
+        """Widen or narrow the time window.
+
+        Zooming here is deliberately one-dimensional: the y axes are pinned to
+        the boxes, and a zoom that moved them too would silently overwrite
+        limits that were set on purpose.
+        """
+        try:
+            current = parse_duration(window)
+        except (ValueError, TypeError):
+            current = DEFAULT_WINDOW_SECONDS
+        factor = 1 / ZOOM_STEP if ctx.triggered_id == "zoom-in" else ZOOM_STEP
+        return format_window(min(max(current * factor, 1.0), MAX_HISTORY_SECONDS))
+
+    @app.callback(
+        Output("auto", "data"), Output("autoscale", "children"),
+        Input("autoscale", "n_clicks"), prevent_initial_call=True)
+    def toggle_autoscale(clicks):
+        """Switch continuous y autoscaling on and off."""
+        on = bool(clicks) and clicks % 2 == 1
+        return on, f"Autoscale: {'on' if on else 'off'}"
+
+    @app.callback(
+        Output("ylim-util", "value", allow_duplicate=True),
+        Output("ylim-temp", "value", allow_duplicate=True),
+        Output("ylim-power", "value", allow_duplicate=True),
+        Output("ylim-bw", "value", allow_duplicate=True),
+        Input("tick", "n_intervals"), Input("auto", "data"),
+        State("ylim-util", "value"), State("ylim-temp", "value"),
+        State("ylim-power", "value"), State("ylim-bw", "value"),
+        prevent_initial_call=True)
+    def apply_autoscale(_tick, on, *shown):
+        """While autoscaling, keep refitting the y axes through the boxes.
+
+        The bounds are written into the boxes rather than applied behind them,
+        so the boxes never stop describing what is on screen, and switching
+        autoscale off just leaves the last fit in place.
+        """
+        if not on:
+            raise PreventUpdate
+        visible = sampler.history.view(view.right_edge - view.window, view.right_edge)
+        updates = []
+        for axis, current in zip(AXIS_OF_BOX, shown):
+            bounds = autoscale_range(visible, METRICS_OF_AXIS[axis])
+            text = format_limits(*bounds) if bounds else None
+            updates.append(text if text is not None and text != current else no_update)
+        if all(update is no_update for update in updates):
+            raise PreventUpdate
+        return updates
+
+    @app.callback(
+        Output("ylim-util", "value", allow_duplicate=True),
+        Output("ylim-temp", "value", allow_duplicate=True),
+        Output("ylim-power", "value", allow_duplicate=True),
+        Output("ylim-bw", "value", allow_duplicate=True),
+        Output("window", "value", allow_duplicate=True),
+        Output("pan", "value", allow_duplicate=True),
+        Input("reset", "n_clicks"), prevent_initial_call=True)
+    def reset_axes(_clicks):
+        """Put every axis, the window and the pan back to the opening values."""
+        return (format_limits(*DEFAULT_UTIL_AXIS), format_limits(*default_temp_axis(sampler)),
+                format_limits(*default_power_axis(sampler)), format_limits(*DEFAULT_BW_AXIS),
+                format_window(DEFAULT_WINDOW_SECONDS), 0)
 
     @app.callback(
         Output("graph", "figure"), Output("pan", "min"), Output("status", "children"),
